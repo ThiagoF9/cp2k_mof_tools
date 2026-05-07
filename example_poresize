@@ -1,0 +1,94 @@
+import sys
+from pathlib import Path
+
+ROOT = Path.cwd()  # deve ser a raiz do projeto
+sys.path.insert(0, str(ROOT))
+
+from scripts.io.cell_reader import read_cell
+from scripts.plotting.cell_time_series import (
+    plot_cell_angles,
+    plot_lattice_lengths,
+    plot_volume_vs_time,
+    plot_split_violin
+)
+from scripts.utils.time import (clip_time,clip_time2)
+from scripts.analysis.block_avg import (avg_over_replicas, block_averaging)
+import matplotlib.pyplot as plt
+import pandas as pd 
+import MDAnalysis as mda
+
+names = [
+        # "300K_1000Ry_15AA_TZV2P_alpha",
+        "300K_1000Ry_15AA_TZV2P_beta"
+        ]
+
+all_data_points = []
+
+for name in names:
+
+    print("Analisando:", name)
+
+    path = fr"data/{name}"
+    FIG_ROOT  = Path("figures")
+    fig_dir  = FIG_ROOT / name
+    fig_dir.mkdir(parents=True, exist_ok=True)
+
+    file = path + "/cp2k-md-pos-1.xyz"
+    file_cell = path + "/cp2k-md-1.cell"
+
+    time_fs, Lx, Ly, Lz, ang_a, ang_b, ang_c, vol, cell_vectors = read_cell(file_cell)
+
+    mask = clip_time2(time_fs, t_start=0, t_end=20000)
+
+    vol = vol[mask]
+    ang_a = ang_a[mask]
+    ang_b = ang_b[mask]
+    ang_c = ang_c[mask]
+    time_fs = time_fs[mask]
+    Lx = Lx[mask]
+    Ly = Ly[mask]
+    Lz = Lz[mask]
+
+    time_ps = time_fs/1000.0
+
+
+u = mda.Universe(file)
+
+from ase import Atoms
+from ase.io import write as ase_write
+
+# --- Antes do loop ---
+# Garanta que você tenha os dados de célula filtrados pela mesma máscara da trajetória
+# Lx, Ly, Lz, ang_a, ang_b, ang_c devem vir do seu processamento anterior
+
+for ts in u.trajectory[::100]:
+    # 1. Pegamos o índice atual para buscar nos arrays Lx, Ly, etc.
+    # Se você aplicou máscara na trajetória, use um contador ou o ts.frame
+    idx = ts.frame 
+
+    # 2. Criamos a lista de dimensões manualmente [a, b, c, alpha, beta, gamma]
+    try:
+        current_cell = [Lx[idx], Ly[idx], Lz[idx], ang_a[idx], ang_b[idx], ang_c[idx]]
+    except IndexError:
+        # Caso o frame da trajetória não bata com o índice do array (devido a filtros)
+        print(f"Aviso: Não foi possível encontrar dimensões para o frame {idx}")
+        continue
+
+    # 3. Corrigimos os símbolos para o formato Case-Sensitive (Ex: Zn, O, C)
+    corrected_symbols = [s.capitalize() for s in u.atoms.types]
+    
+    # 4. Construímos o objeto Atoms do ASE
+    atoms_ase = Atoms(
+        symbols=corrected_symbols,
+        positions=u.atoms.positions,
+        cell=current_cell,
+        pbc=True
+    )
+    
+    # 5. Salvamento do CIF
+    output_dir = Path(f"data/processed/{name}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    output_path = output_dir / f"frame_{ts.frame}.cif"
+    ase_write(str(output_path), atoms_ase)
+

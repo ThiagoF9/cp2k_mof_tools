@@ -1,0 +1,100 @@
+import sys
+from pathlib import Path
+
+ROOT = Path.cwd()  # deve ser a raiz do projeto
+sys.path.insert(0, str(ROOT))
+from scripts.plotting.cell_time_series import (
+    plot_split_violin
+)
+from scripts.plotting.hist_distances import plot_distance_histogram
+import pandas as pd
+import re
+import matplotlib.pyplot as plt
+
+def parse_frame_number(frame_str: str) -> int:
+    m = re.search(r'(\d+)', frame_str)
+    return int(m.group(1)) if m else None
+
+def load_pore_data(filepath: str, timestep_fs: float = 0.5, sep: str = ';') -> pd.DataFrame:
+    df = pd.read_csv(filepath, sep=sep, engine='python')
+    df.columns = ['frame', 'Df_A']
+    df['frame_number'] = df['frame'].apply(parse_frame_number)
+    df = df.dropna(subset=['frame_number'])
+    df['frame_number'] = df['frame_number'].astype(int)
+    df['time_fs'] = df['frame_number'] * timestep_fs
+    df['time_ps'] = df['time_fs'] / 1000.0
+    df = df.sort_values('time_fs').reset_index(drop=True)
+    return df[['frame', 'frame_number', 'time_fs', 'time_ps', 'Df_A']]
+
+names = [
+        "300K_1000Ry_15AA_TZV2P_alpha",
+        "300K_1000Ry_15AA_TZV2P_beta"
+        ]
+
+all_data_points = []
+
+for name in names:
+
+    print("Analisando:", name)
+
+
+    path = fr"data/processed/{name}"
+    FIG_ROOT = Path("figures")
+    file = path + "/trajetoria_poros.txt"
+
+    df_pore = load_pore_data(file)
+
+
+    plt.rcParams.update({
+        "text.usetex": True,
+        "font.family": "serif", # Fontes serifadas combinam melhor com LaTeX (Computer Modern)
+        "text.latex.preamble": r"\usepackage{icomma}\usepackage{amsmath}"
+    })
+
+
+    temp_val = "300"#name.split('_')[0] # Ex: "298"
+    fase_val = r"$\alpha$" if "alpha" in name else r"$\beta$"
+
+    # Criamos um DataFrame temporário para este arquivo
+    # temp_df = pd.DataFrame({
+    #     'Pore_size': df_pore['Df_A'],
+    #     'Temperatura': temp_val,
+    #     'Fase': fase_val
+    # })
+
+    temp_df = pd.DataFrame({
+        'tempo': df_pore['time_ps'],
+        'Pore_size': df_pore['Df_A'],
+        'Fase': fase_val
+    })
+
+    all_data_points.append(temp_df)
+
+
+if all_data_points:
+    master_df = pd.concat(all_data_points, ignore_index=True)
+
+    # # Chamamos a função
+    # plot_split_violin(
+    #     master_df, 
+    #     x_col='Temperatura', 
+    #     y_col='Pore_size',
+    #     hue_col='Fase',
+    #     ylabel=r"Tamanho do Poros ($\mathrm{\AA}$)",
+    #     save_path=FIG_ROOT / "violin_comparativo_pore_sizea.png"
+    # )
+
+    plot_distance_histogram(
+        master_df,
+        labels=[r"300K $\alpha$", r"300K $\beta$"],
+        bins=50,
+        density=True,
+        xlabel=r"Tamanho do Poros ($\mathrm{\AA}$)",
+        ylabel="Probabilidade",
+        title=None,
+        xlim=None,
+        alpha=0.6,
+        show=True,
+        savefile=None,
+        save_csv=None
+    )
